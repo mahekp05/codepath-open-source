@@ -37,3 +37,39 @@ Issue reproduced successfully on a local development instance using the provided
 * Update `src/frontend/src/pages/stock/StockDetail.tsx` to include a Barcode field in the Stock Details panel.
 * Ensure the barcode field is only shown when a barcode is linked to the stock item.
 * Verify that the barcode string is visible on the Stock Details page and that existing barcode functionality remains unchanged.
+
+## Implementation Notes
+
+After investigating the barcode data flow across the InvenTree codebase, I found that the linked barcode string is stored in the `barcode_data` field on `InvenTreeBarcodeMixin`, which is inherited by `StockItem`. However, the `StockItemSerializer` only exposed `barcode_hash`, preventing the linked barcode string from being displayed in the frontend.
+
+To address this issue, I:
+
+* Added `barcode_data` as a read-only field in `StockItemSerializer`.
+* Updated `StockDetail.tsx` to display a new **Linked Barcode** field in the Stock Details panel.
+* Configured the field to only appear when a linked barcode exists.
+* Added copy-to-clipboard support for consistency with other fields in the interface.
+* Preserved all existing barcode link and unlink functionality.
+
+## Code Changes
+
+**Development Branch:**
+https://github.com/mahekp05/InvenTree/tree/fix-11745-linked-barcode-ui
+
+**Relevant Commit:**
+`feat: display linked barcode on stock detail page`
+
+The implementation includes changes to:
+
+* `src/backend/InvenTree/stock/serializers.py`
+* `src/frontend/src/pages/stock/StockDetail.tsx`
+
+## Testing Strategy
+
+To validate the implementation, I:
+
+1. Investigated the existing barcode workflow and confirmed that linked barcode information was stored in `barcode_data`.
+2. Verified that the updated stock item API response included the `barcode_data` field.
+3. Linked a test barcode (`TEST-123`) to a stock item and confirmed that the API returned the expected value.
+4. Verified that the frontend conditionally renders the Linked Barcode field only when barcode data exists.
+5. Confirmed that existing barcode link and unlink actions remained unchanged.
+
