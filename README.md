@@ -3,9 +3,13 @@
 ## Contribution 1: Show Linked Barcode String in the User Interface
 
 **Student:** Mahek Patel
+
 **Contribution Number:** 1
+
 **Project:** InvenTree
+
 **Issue:** inventree/InvenTree#11745
+
 **Status:** Maintainer Feedback Addressed — Awaiting Further Review
 
 ## Why I Chose This Issue
