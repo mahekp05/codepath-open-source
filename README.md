@@ -10,232 +10,186 @@
 
 **Issue:** inventree/InvenTree#11745
 
-**Status:** Maintainer Feedback Addressed — Awaiting Further Review
+**Status:** Maintainer Feedback Addressed, Updated for Latest Master — Awaiting Further Review
 
 ## Why I Chose This Issue
 
-I chose this issue because it addressed a user-facing feature with a clearly defined problem and expected outcome. In previous versions of InvenTree, users could view the barcode string linked to a stock item directly from its details page. Following a user interface update, this information was no longer visible, making manual barcode verification more difficult.
+I chose this issue because it addressed a user-facing feature with a clearly defined problem and expected outcome. Previous versions of InvenTree displayed the linked barcode string directly on a stock item's details page, allowing users to verify custom barcodes easily. Following a user interface refactor, this information was no longer visible, making manual barcode verification more difficult.
 
-This contribution also aligned with my interests in full-stack development and user interface design. Through my previous work developing educational software, I have frequently connected backend data to frontend interfaces. This issue gave me the opportunity to apply those skills while learning how data models, serializers, frontend components, automated tests, and API versioning are managed within a large production codebase.
+This contribution also aligned with my interests in full-stack development. Through previous work developing educational software, I have frequently connected backend data to frontend interfaces. This issue provided an opportunity to work across serializers, frontend components, automated tests, and API versioning while contributing to a large production codebase.
 
 ## Steps to Reproduce the Original Issue
 
 1. Fork and clone the InvenTree repository.
 2. Build and start the development environment using the provided Docker development setup.
-3. Populate the database with sample inventory data.
+3. Populate the database with the sample inventory data.
 4. Start the application and navigate to the local development server.
 5. Log in using the development credentials.
-6. Navigate to Stock and open a stock item.
+6. Navigate to **Stock** and open a stock item.
 7. Link a barcode to the stock item.
-8. Open the Stock Details tab.
-9. Observe that barcode-related actions are available, but the linked barcode string is not displayed in the details panel.
+8. Open the **Stock Details** tab.
+9. Observe that barcode actions are available, but the linked barcode string is not displayed.
 
 ## Reproduction Evidence
 
-The issue was successfully reproduced using a local InvenTree development environment and the provided test dataset.
+**Expected:** The linked barcode string should appear in the details panel whenever a barcode is associated with the object.
 
-The Stock Details panel displayed information such as the base part, status, supplier part, location, purchase order, unit price, and stock value. However, it did not display the barcode string linked to the stock item.
+**Actual:** The backend stored the linked barcode in `barcode_data`, but the API did not expose this field, so the frontend could not display it.
 
 ## Investigation
 
-While investigating the barcode data flow, I found that the linked third-party barcode string is stored in the `barcode_data` field provided by `InvenTreeBarcodeMixin`, which is inherited by `StockItem`.
+While tracing the barcode data flow, I found that the linked barcode is stored in the `barcode_data` field provided by `InvenTreeBarcodeMixin`, which is inherited by `StockItem` and several other models.
 
-However, `StockItemSerializer` exposed `barcode_hash` without exposing `barcode_data`. As a result, the frontend did not receive the original human-readable barcode string and could not display it in the Stock Details panel.
+However, `StockItemSerializer` exposed `barcode_hash` without exposing `barcode_data`. As a result, the frontend never received the human-readable barcode string required to display the linked barcode.
 
-My initial investigation focused specifically on `StockItem` because this was the model described in the original issue. After submitting the initial implementation, maintainer feedback highlighted that `InvenTreeBarcodeMixin` is shared by multiple models and the solution should apply generically to all models that support custom barcodes.
+My initial investigation focused only on `StockItem` because that was the object referenced in the issue. After submitting my first implementation, maintainer feedback explained that barcode support is implemented through `InvenTreeBarcodeMixin`, so the solution should be generalized across every model that supports custom barcodes rather than adding special-case behavior for stock items.
 
 ## Implementation
 
 ### Initial Implementation
 
-My initial implementation restored the linked barcode string specifically for `StockItem`.
+My original implementation restored the linked barcode string only for `StockItem`.
 
 I:
 
-* Added `barcode_data` as a read-only field on `StockItemSerializer`.
-* Added a copyable Linked Barcode field to the Stock Details panel.
-* Configured the field to appear only when a barcode is linked.
-* Preserved the existing barcode linking and unlinking behavior.
-* Added backend API coverage for the serializer field.
-* Added a Playwright test for the barcode link, display, and unlink workflow.
-* Updated the InvenTree API version for the newly exposed field.
+* Added `barcode_data` as a read-only serializer field.
+* Added a copyable **Linked Barcode** field to the Stock Details page.
+* Displayed the field only when barcode data exists.
+* Preserved the existing barcode link and unlink workflow.
+* Added backend serializer tests.
+* Added a Playwright end-to-end test.
+* Updated the API version.
 
-This implementation addressed the original issue but introduced behavior specifically for `StockItem`.
+Although this fixed the original issue, it only solved the problem for one model.
 
 ### Revised Generic Implementation
 
-After receiving maintainer feedback, I reworked the solution to apply generically across all models that support custom barcodes through `InvenTreeBarcodeMixin`.
+Following maintainer feedback, I redesigned the implementation to work generically across every model using `InvenTreeBarcodeMixin`.
 
-#### Backend — Shared Serializer Mixin
+#### Backend
 
-I added `BarcodeSerializerMixin` in `InvenTree/serializers.py`. The mixin declares the read-only `barcode_data` field once.
+I introduced a reusable `BarcodeSerializerMixin` inside `InvenTree/serializers.py`.
 
-Each barcode-supporting serializer uses the mixin and adds `barcode_data` to its serializer fields.
+Instead of exposing `barcode_data` separately for every serializer, each barcode-enabled serializer now inherits the shared mixin.
 
-For order types, the field is integrated through the shared `AbstractOrderSerializer` and `order_fields()` implementation. This allows PurchaseOrder, SalesOrder, ReturnOrder, and TransferOrder to share the behavior without duplicating serializer logic.
+For order models, the field is integrated through the shared `AbstractOrderSerializer` and `order_fields()` implementation so that Purchase Orders, Sales Orders, Return Orders, and Transfer Orders all share the same implementation.
 
-#### Frontend — Shared Detail Field Helper
+#### Frontend
 
-I added `barcodeDataField(instance)` in `components/details/Details.tsx`.
+I introduced a shared `barcodeDataField(instance)` helper for rendering the Linked Barcode field.
 
-The helper returns the copyable Linked Barcode detail field and only displays it when barcode data exists.
+Later, while the pull request was under review, upstream changes refactored the details pages into dedicated `DetailsPanel` components. After rebasing onto the latest `master`, I updated the implementation to match the new architecture by integrating the shared barcode field into each `DetailsPanel` while preserving the reusable helper and keeping behavior consistent across all supported models.
 
-Each supported detail page spreads the shared helper into its details grid. The original StockItem implementation was also refactored to use this helper so that the barcode display behavior is no longer special-cased.
-
-The linked barcode string is now supported for:
+The Linked Barcode field is now supported across:
 
 * Part
-* StockItem
-* StockLocation
+* Stock Item
+* Stock Location
 * Build
-* SupplierPart
-* ManufacturerPart
-* PurchaseOrder
-* SalesOrder
-* ReturnOrder
-* TransferOrder
-* SalesOrderShipment
+* Supplier Part
+* Manufacturer Part
+* Purchase Order
+* Sales Order
+* Return Order
+* Transfer Order
+* Sales Order Shipment
 
 ## Code Changes
 
 ### Backend
 
-* `InvenTree/serializers.py` — added the shared `BarcodeSerializerMixin`.
-* `stock/serializers.py` — integrated shared barcode serialization.
-* `part/serializers.py` — integrated shared barcode serialization.
-* `build/serializers.py` — integrated shared barcode serialization.
-* `company/serializers.py` — integrated shared barcode serialization.
-* `order/serializers.py` — integrated barcode data through shared order serializer logic.
-* `InvenTree/api_version.py` — added the API v520 changelog.
-* `InvenTree/test_serializers.py` — added generic serializer tests for barcode-supporting models.
+* Added reusable `BarcodeSerializerMixin` in `InvenTree/serializers.py`.
+* Integrated shared barcode serialization across stock, part, build, company, and order serializers.
+* Added generic serializer tests covering all supported barcode models.
+* Updated the API changelog to **v531**.
 
 ### Frontend
 
-* `components/details/Details.tsx` — added the shared `barcodeDataField` helper.
-* Stock detail page.
-* Part detail page.
-* Stock Location detail page.
-* Build detail page.
-* Manufacturer Part detail page.
-* Supplier Part detail page.
-* Purchase Order detail page.
-* Sales Order detail page.
-* Return Order detail page.
-* Transfer Order detail page.
+* Added reusable `barcodeDataField(instance)` helper.
+* Integrated the shared helper throughout the new `DetailsPanel` architecture after rebasing onto the latest `master`.
+* Removed model-specific implementations so every supported detail page behaves consistently.
 
-**Development Branch:** https://github.com/mahekp05/InvenTree/tree/fix-11745-linked-barcode-ui
+**Development Branch:** `fix-11745-linked-barcode-ui`
 
 ## Testing Strategy
 
-I expanded the testing strategy after generalizing the implementation.
+### Backend
 
-### Backend Testing
+Added a generic `BarcodeSerializerMixinTest` covering every serializer exposing barcode data.
 
-I added a generic `BarcodeSerializerMixinTest` covering all 11 serializers that expose barcode data.
+The tests verify:
 
-The test verifies that:
+* `barcode_data` is exposed.
+* The expected barcode value is returned.
+* The field remains read-only.
 
-* `barcode_data` is exposed by each barcode-supporting serializer.
-* The expected linked barcode data is returned.
-* `barcode_data` remains read-only.
+The existing StockItem API workflow test was retained to ensure the original issue continues to work correctly.
 
-I also retained the existing StockItem end-to-end API test to validate the original issue workflow.
+### Frontend
 
-### Frontend Testing
+The Playwright test verifies the complete user workflow:
 
-The Playwright test covers the complete barcode link, display, and unlink flow.
+1. Link a barcode.
+2. Open the details page.
+3. Verify that the Linked Barcode field appears.
+4. Confirm the expected barcode string is displayed.
+5. Unlink the barcode.
+6. Verify the field disappears.
 
-The test:
-
-1. Links a barcode.
-2. Opens the relevant details panel.
-3. Confirms that the Linked Barcode field is displayed.
-4. Verifies that the expected barcode string is visible.
-5. Unlinks the barcode.
-6. Confirms that the Linked Barcode field is no longer displayed.
-
-This testing approach validates both the shared serializer behavior and the original user-facing workflow.
+These tests validate both the reusable serializer implementation and the original user-facing behavior.
 
 ## Pull Request
 
-**PR Link:** inventree/InvenTree#12354
+**PR:** inventree/InvenTree#12354
 
-### PR Evolution
+### Evolution of the Pull Request
 
-The pull request initially restored the linked third-party barcode string specifically on the Stock Item details page.
+This contribution evolved through several iterations.
 
-Following maintainer feedback, the implementation was redesigned to expose and display linked barcode data consistently across all models that support custom barcodes.
+The initial implementation restored the linked barcode only for Stock Items.
 
-The revised pull request now uses shared backend and frontend abstractions to avoid model-specific implementations and duplicate logic.
+Following maintainer feedback, I redesigned the implementation to use shared backend and frontend abstractions so every model supporting custom barcodes receives the same functionality.
 
-**Relevant Issue:** Fixes inventree/InvenTree#11745
+While the pull request remained open, the upstream project refactored detail pages into `DetailsPanel` components. I rebased onto the latest `master`, resolved merge conflicts, updated the implementation to follow the new architecture, and bumped the API version to **v531** so the pull request remained compatible with the current codebase.
 
 ## Acceptance Criteria
 
-* [x] The original issue can no longer be reproduced.
-* [x] The linked barcode string is exposed through the API.
-* [x] The API field is read-only.
-* [x] The Linked Barcode field is shown when barcode data exists.
-* [x] The Linked Barcode field is hidden when no barcode is linked.
-* [x] Existing barcode link and unlink functionality remains unchanged.
-* [x] Shared backend serializer logic added.
-* [x] Shared frontend detail-field logic added.
-* [x] Barcode data exposed across all supported barcode models.
-* [x] Generic backend test coverage added for all 11 serializers.
-* [x] Playwright coverage retained for the user workflow.
-* [x] Relevant formatting and pre-commit checks completed.
-* [x] API version updated for the newly exposed field.
+* ✅ Original issue can no longer be reproduced.
+* ✅ `barcode_data` exposed through the API.
+* ✅ API field remains read-only.
+* ✅ Linked Barcode displayed whenever barcode data exists.
+* ✅ Linked Barcode hidden when no barcode is linked.
+* ✅ Existing barcode workflow preserved.
+* ✅ Shared backend serializer implementation.
+* ✅ Shared frontend implementation.
+* ✅ Generic support across all barcode-enabled models.
+* ✅ Backend test coverage expanded.
+* ✅ Playwright workflow retained.
+* ✅ Updated for latest upstream architecture.
+* ✅ API version updated to **v531**.
 
 ## Maintainer Feedback
 
-### July 10, 2026
+### July 2026
 
-After submitting the initial pull request, I received feedback that the implementation should not be limited to `StockItem`.
+The maintainer requested that the implementation not be limited to `StockItem` because barcode support originates from `InvenTreeBarcodeMixin`.
 
-Since `barcode_data` is provided by `InvenTreeBarcodeMixin`, the linked barcode field should be exposed consistently across all models that support custom barcodes.
+In response, I redesigned the implementation using reusable backend serializer mixins and shared frontend helpers so every supported model received consistent behavior.
 
-Based on this feedback, I reworked the implementation to use a shared backend serializer mixin and a shared frontend detail-field helper.
+### August 2026
 
-The revised implementation:
+While the pull request was awaiting review, the upstream project introduced a significant frontend refactor that migrated detail pages to `DetailsPanel` components.
 
-* Adds `BarcodeSerializerMixin` as a reusable backend abstraction.
-* Exposes `barcode_data` across all barcode-supporting serializers.
-* Uses shared order serializer logic to avoid duplication across order types.
-* Adds `barcodeDataField(instance)` as a reusable frontend helper.
-* Refactors the original StockItem implementation to use the shared approach.
-* Expands backend test coverage across all 11 supported serializers.
-* Retains end-to-end coverage for the original barcode workflow.
-
-This was a significant change from my initial implementation, but it resulted in a more reusable and consistent solution.
+I rebased onto the latest `master`, resolved merge conflicts, adapted the implementation to the new architecture, updated the API version to **v531**, and verified that the shared barcode implementation continued to work correctly.
 
 ## Current Status
 
-**Maintainer Feedback Addressed — Awaiting Further Review**
-
-The initial implementation has been reworked based on reviewer feedback and pushed to the existing pull request.
-
-The pull request now applies the Linked Barcode field generically across all models that support custom barcodes. I will continue monitoring the pull request and responding to additional review feedback or automated checks.
+The pull request has been updated to match the latest upstream codebase and now provides generic linked barcode support across all barcode-enabled models using shared backend and frontend abstractions. I will continue monitoring the pull request and respond to any additional maintainer feedback or future upstream changes.
 
 ## Learnings and Reflections
 
-The biggest lesson from this contribution was learning to recognize the difference between solving the immediate issue and designing a reusable solution that fits the architecture of an existing codebase.
+The biggest lesson from this contribution was learning that solving the immediate bug is only one part of contributing to an established open-source project.
 
-My initial implementation correctly restored the Linked Barcode field for `StockItem`, which addressed the specific user-facing issue. However, maintainer feedback helped me recognize that the underlying barcode behavior was not unique to stock items.
+My first implementation correctly fixed the reported issue, but maintainer feedback helped me recognize that the feature belonged in shared infrastructure rather than a single model. Later, while the pull request remained open, I also experienced maintaining an active contribution through upstream architectural changes. Rebasing, resolving merge conflicts, and adapting the implementation to a new frontend structure reinforced the importance of designing reusable code and keeping long-running pull requests synchronized with an evolving codebase.
 
-Because multiple models inherit barcode functionality through `InvenTreeBarcodeMixin`, implementing the feature only for `StockItem` created unnecessary special-case behavior.
-
-I learned how to step back from a feature-specific implementation and redesign it using shared abstractions.
-
-On the backend, I created a reusable serializer mixin so the field is declared consistently across barcode-supporting serializers. On the frontend, I created a shared details helper so each page can display barcode data without duplicating the same field configuration.
-
-This experience strengthened my understanding of clean and reusable software design. Instead of asking only, "Does my code fix the issue?", I learned to also ask:
-
-* Does similar functionality already exist elsewhere in the codebase?
-* Which models share the same underlying behavior?
-* Am I introducing a special case that could be generalized?
-* Can shared logic reduce duplication and keep behavior consistent?
-* How should tests change when an implementation becomes more generic?
-
-I also learned that maintainer feedback is an important part of understanding a project's architecture. The requested changes were not simply corrections to my code. They helped me better understand how InvenTree organizes shared model behavior and how contributors are expected to build features that fit those existing abstractions.
-
-For future open-source contributions, I want to investigate shared base classes, mixins, and reusable frontend utilities earlier in the implementation process. This will help me design solutions that align more closely with the architecture of the project from the beginning.
+This experience strengthened my understanding of reusable software design, project architecture, and the collaborative review process used in large open-source projects.
